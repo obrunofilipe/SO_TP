@@ -12,20 +12,38 @@
 #define MAX_BUFFER 1024
 
 /*---------- Variaveis Globais ----------*/
+int n_filters;
 char *names[5];
 char *filters[5];
 int max_instance[5];
 int open_instances[5];
-char *tasks[2048];
+char *tasks[512];
+char *waiting_tasks[512];
 int nextTask;
+int ongoing_tasks = 0;
 
 
 
 
 
-char * line ;
+char *line ;
 int line_index = 0;
 int line_end = 0;
+
+void printStatus(int n_filters){
+    int i = 0;
+    char* line_to_print = malloc(sizeof(char*) * 128);
+    while (i < ongoing_tasks){
+        if (strcmp(tasks[i], "acabou") != 0){
+            write(STDOUT_FILENO, tasks[i], 512);
+            i++;
+        }
+    }
+    for (int i = 0; i < n_filters; i++){
+        sprintf(line_to_print, "Filter %s: %d/%d (running/max)\n", names[i], open_instances[i], max_instance[i]);
+        write (STDOUT_FILENO, line_to_print, 128);
+    }
+}
 
 
 int searchFilterIndex(char* filterName){
@@ -36,6 +54,14 @@ int searchFilterIndex(char* filterName){
     return i;
 }
 
+char* filterWithName (char* name){
+    char* filter = malloc(sizeof(char)*30);
+    int i = 0;
+    while (strcmp(names[i], name) != 0){
+        i++;
+    }
+    return strdup(filters[i]);
+}
 
 ssize_t readln(int fildes, void *buf, size_t nbyte){
     ssize_t res = 0;
@@ -50,7 +76,7 @@ ssize_t readln(int fildes, void *buf, size_t nbyte){
 
 char** cmd_parser (char* cmd_list, int *n_cmds){
     int i = 0;
-    char** parsed_cmds = malloc(sizeof(char*)*MAX_COMMANDS);
+    char** parsed_cmds = malloc(sizeof(char*) * MAX_COMMANDS);
 
     char* token;
 
@@ -102,9 +128,11 @@ void read_config(char** names, char** filters, int* max_instance){
         max_instance[counter] = atoi(parsed_line[2]);
         counter++;
     }
+    n_filters = counter;
 }
 
-void executeTask(int n_filters, char **f_a_executar, char input_file[]){
+void executeTask(int n_filters, char **f_a_executar, char input_file[], int task){
+    ongoing_tasks++;
     int fp [n_filters + 1][2];
     int pid;
     int current_pipe = 0;
@@ -121,6 +149,9 @@ void executeTask(int n_filters, char **f_a_executar, char input_file[]){
     for (int i = 0; i < n_filters; i++){
         indexes[i] = searchFilterIndex(f_a_executar[i]);
     }
+    for (int i = 0; i < n_filters; i++){
+        open_instances[indexes[i]]++;
+    }
     switch (pid = fork()) {
         case 0://processo filho de controlo
             close(fp[current_pipe][1]);
@@ -133,6 +164,7 @@ void executeTask(int n_filters, char **f_a_executar, char input_file[]){
                             write(STDOUT_FILENO,aux,25);
                             write(fp[current_pipe+1][1],buffer,nb_read);
                         }
+                        sleep(2);
                         sprintf(aux,"fim filho%d:\n",filter);
                         write(STDOUT_FILENO,aux,25);
                         close(fp[current_pipe][0]);
@@ -163,14 +195,16 @@ void executeTask(int n_filters, char **f_a_executar, char input_file[]){
             while ((nb_read = read(ft, buffer, 1024)) > 0) {
                 write(fp[current_pipe][1],buffer,nb_read);
             }
-            printf("pai: ler ficheiro \n");
-            close(fp[current_pipe][1]);
-            wait(&status);
+            //decrementar
             for (int i = 0; i < n_filters; i++){
                 open_instances[indexes[i]]--;
             }
+            tasks[task-1] = "acabou";
+            printf("pai: ler ficheiro \n");
+            close(fp[current_pipe][1]);
             break;
     }
+    ongoing_tasks--;
 }
 
 int main(int argc, char* argv[]){
@@ -184,15 +218,59 @@ int main(int argc, char* argv[]){
     }
     read_config(names, filters, max_instance);
     char s[4] = "ola";
-    char ** f_a_executar = malloc(sizeof(char*) * 3);
-    f_a_executar[0] = strdup("aurrasd-gain-double");
-    f_a_executar[1] = strdup("aurrasd-gain-half");
-    f_a_executar[2] = strdup("aurrasd-tempo-half");
+
+    char** f_a_executar;
     
-    executeTask(3,f_a_executar,s);
-    for(int i = 0; i < 5 ; i++){
-        printf("%d, ", open_instances[i]);
+
+    char **parsed_commands;
+    char task_array_test[4][512] = {"transform /home/user/samples/sample-1.m4a output-1.m4a baixo rapido ", "transform /home/user/samples/sample-1.m4a output-1.m4a baixo rapido eco lento alto", "transform /home/user/samples/sample-2.m4a output-3.m4a rapido rapido baixo eco", "transform /home/user/samples/sample-2.m4a output-3.m4a lento lento baixo eco"};
+    int task_counter = 1;
+    int n_commands;
+    char* task_to_be_parsed = malloc(sizeof(char)*128);
+    int filters_exec;
+    while (task_counter < 5){
+        //deverá estar dentro de um while para tratar cada pedido individualmente
+        sprintf (task_to_be_parsed, "%s", task_array_test[task_counter-1]);
+        parsed_commands = cmd_parser(task_to_be_parsed, &n_commands);
+        filters_exec = n_commands-3;
+        
+        f_a_executar = malloc(sizeof(char*) * (filters_exec));
+
+        for (int i = 3; i < n_commands; i++){
+            f_a_executar[i-3] = malloc(sizeof(char)*10);
+            sprintf (f_a_executar[i-3], "%s", filterWithName(parsed_commands[i]));
+        }
+
+
+        tasks[task_counter-1] = malloc(sizeof(char) * 512);
+        sprintf (tasks[task_counter-1], "task #%d: %s", task_counter, task_array_test[task_counter-1]);
+        
+
+        executeTask(filters_exec, f_a_executar, s, task_counter);
+        for(int i = 0; i < 5 ; i++){
+            printf("%d, ", open_instances[i]);
+        }
+        printf ("\nDepois do execute_task");
+        for (int i = 0; i < task_counter; i++){
+            printf ("\n%s", tasks[i]);
+        }
+
+
+        printf ("\n");
+        task_counter++;
     }
+    sleep(5);
+
+    printf ("\n\n\n STATUS\n");
+    printStatus(n_filters);
+    printf ("\n\n\n");
+
+    printf ("Array de tasks: \n");
+    for (int i = 0; i < 4; i++){
+        printf ("%s\n", tasks[i]);
+    }
+
+    
     /*
     if (mkfifo("fifo", 0666) == -1){
         perror ("Fifo not created");
