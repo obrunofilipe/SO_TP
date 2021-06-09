@@ -15,6 +15,7 @@
 char *names[5];
 char *filters[5];
 int max_instance[5];
+int open_instances[5];
 char *tasks[2048];
 int nextTask;
 
@@ -26,6 +27,14 @@ char * line ;
 int line_index = 0;
 int line_end = 0;
 
+
+int searchFilterIndex(char* filterName){
+    int i = 0;
+    while (strcmp(filterName, filters[i]) != 0){
+        i++;
+    }
+    return i;
+}
 
 
 ssize_t readln(int fildes, void *buf, size_t nbyte){
@@ -95,65 +104,71 @@ void read_config(char** names, char** filters, int* max_instance){
     }
 }
 
-void executeTask(int n_filters , char *filters[] , char input_file[] ){
+void executeTask(int n_filters, char **f_a_executar, char input_file[]){
     int fp [n_filters + 1][2];
     int pid;
     int current_pipe = 0;
-    char *buffer = malloc(sizeof(char) * 25);
+    char *buffer = malloc(sizeof(char) * 1024);
     char *aux = malloc(sizeof(char) * 25);
     buffer = strdup("\nmensagem para teste\n");
     int filter = 0;
-    //processo principal de controlo
+    int nb_read;
+    int ft = open("teste.txt",O_RDONLY,0666);
+    int ftf = open("final.txt", O_CREAT | O_RDWR, 0666);
+    int status;
     pipe(fp[current_pipe]);
-    write(fp[current_pipe][1],buffer,25);
-    close(fp[current_pipe][1]);
+    int indexes[n_filters];
+    for (int i = 0; i < n_filters; i++){
+        indexes[i] = searchFilterIndex(f_a_executar[i]);
+    }
     switch (pid = fork()) {
         case 0://processo filho de controlo
+            close(fp[current_pipe][1]);
             while(current_pipe <= n_filters){
-                if(current_pipe >= 0 && current_pipe < n_filters){
-                    pipe(fp[current_pipe+1]);
-                    switch (fork()) {
-                        case 0:
-                            read(fp[current_pipe][0],buffer,25);
-                            /* -- teste -- */
-                            sprintf(aux,"%d;%s",filter,buffer);
+                pipe(fp[current_pipe+1]);
+                switch (fork()){
+                    case 0:
+                        while((nb_read = read(fp[current_pipe][0],buffer,1024)) > 0){
+                            sprintf(aux,"filho%d:lerficheiro\n",filter);
                             write(STDOUT_FILENO,aux,25);
-
-                            write(fp[current_pipe+1][1],buffer,25);
-                            exit(0);
-                            break;
-                        default:
-                            close(fp[current_pipe][0]);//fechar o descritor de leitura do pipe anterior para nao ser herdado por mais nenhum processo
-                            close(fp[current_pipe+1][1]);//fechar o descritor de escrita do proximo pipe para nao ser herdado por mais nenhum processo
-                            break;
-                    }
-                }
-                else if(current_pipe == n_filters){
-                    pipe(fp[current_pipe+1]);
-                    switch (fork()) {
-                        case 0:
-                            read(fp[current_pipe][0],buffer,25);
-                            /* -- teste -- */
-                            sprintf(aux,"%d;%s",filter,buffer);
-                            write(STDOUT_FILENO,aux,25);
-
-                            write(fp[current_pipe+1][1],buffer,25);
-                            exit(0);
-                            break;
-                        default:
-                            close(fp[current_pipe][0]);//fechar o descritor de leitura do pipe anterior para nao ser herdado por mais nenhum processo
-                            break;
-                    }
+                            write(fp[current_pipe+1][1],buffer,nb_read);
+                        }
+                        sprintf(aux,"fim filho%d:\n",filter);
+                        write(STDOUT_FILENO,aux,25);
+                        close(fp[current_pipe][0]);
+                        close(fp[current_pipe+1][1]);
+                        exit(0);
+                        break;
+                    default:
+                        close(fp[current_pipe][0]);   //fechar o descritor de leitura do pipe anterior para nao ser herdado por mais nenhum processo
+                        close(fp[current_pipe+1][1]); //fechar o descritor de escrita do proximo pipe para nao ser herdado por mais nenhum processo
+                        wait(&status);
+                        break;
                 }
                 current_pipe++;
                 filter++;
             }
-            read(fp[n_filters+1][0],buffer,25);
-            sprintf(aux,"pai:%s",buffer);
-            write(STDOUT_FILENO,aux,35);
+            sprintf(aux,"fim dos filhos\n");
+            write(STDOUT_FILENO,aux,25);
+            while((nb_read = read(fp[current_pipe][0],buffer,1024)) > 0){
+                sprintf(aux,"escrever final\n");
+                write(STDOUT_FILENO,aux,25);
+                write(ftf,buffer,nb_read);
+            }
+            sprintf(aux,"final\n");
+            write(STDOUT_FILENO,aux,25);
+            exit(0);
             break;
         default: //processo pai:
-
+            while ((nb_read = read(ft, buffer, 1024)) > 0) {
+                write(fp[current_pipe][1],buffer,nb_read);
+            }
+            printf("pai: ler ficheiro \n");
+            close(fp[current_pipe][1]);
+            wait(&status);
+            for (int i = 0; i < n_filters; i++){
+                open_instances[indexes[i]]--;
+            }
             break;
     }
 }
@@ -164,9 +179,20 @@ int main(int argc, char* argv[]){
     //char** names = malloc(sizeof(char*)*n_filters);
     //char** filters = malloc(sizeof(char*)*n_filters);
     //int* max_instance = malloc(sizeof(int)*n_filters);
+    for (int i = 0 ; i < 5 ; i++){
+        open_instances[i] = 0;
+    }
     read_config(names, filters, max_instance);
     char s[4] = "ola";
-    executeTask(3,filters,s);
+    char ** f_a_executar = malloc(sizeof(char*) * 3);
+    f_a_executar[0] = strdup("aurrasd-gain-double");
+    f_a_executar[1] = strdup("aurrasd-gain-half");
+    f_a_executar[2] = strdup("aurrasd-tempo-half");
+    
+    executeTask(3,f_a_executar,s);
+    for(int i = 0; i < 5 ; i++){
+        printf("%d, ", open_instances[i]);
+    }
     /*
     if (mkfifo("fifo", 0666) == -1){
         perror ("Fifo not created");
