@@ -7,44 +7,62 @@
 #include <string.h>
 #include <stdlib.h>
 
+/*---------------- MACROS ---------------*/
 #define MAX_SIZE_BUFFER 1024
 #define MAX_COMMANDS 10
 #define MAX_BUFFER 1024
+#define N_FILTERS 5
+#define TRUE 1
+#define FALSE 0
+
 
 /*---------- Variaveis Globais ----------*/
+
 int n_filters;
 char *names[5];
 char *filters[5];
 int max_instance[5];
 int open_instances[5];
-char *tasks[512];
+char *tasks[1024];
+char* tasks_final[1024];
+pid_t pids[1024];
 char *waiting_tasks[512];
+int current_waiting = 0;
+int next_waiting = 0;
 int nextTask;
 int ongoing_tasks = 0;
+int current_task = 0;
 
 
+int checkFilter(char** f_to_exec, int number_f){
+    int index;
+    int res = FALSE;
+    int array_filters[n_filters];
+    for (int i = 0; i < number_f; i++) array_filters[i] = 0;
+    for (int i = 0; i < number_f; i++){
+        index = searchFilterIndex(f_to_exec[i]);
+        array_filters[index]++;
+    }
+    for (int i = 0; i < n_filters; i++){
+        if ((array_filters[i] + open_instances[i]) >= max_instance[i]) return FALSE;
+    }
+    return TRUE;
+}
 
+char** cmd_parser (char* cmd_list, int *n_cmds);
 
 
 char *line ;
 int line_index = 0;
 int line_end = 0;
 
-void printStatus(int n_filters){
+int pid_index(pid_t pid){
     int i = 0;
-    char* line_to_print = malloc(sizeof(char*) * 128);
-    while (i < ongoing_tasks){
-        if (strcmp(tasks[i], "acabou") != 0){
-            write(STDOUT_FILENO, tasks[i], 512);
-            i++;
-        }
+    while (pids[i] != pid){
+        i++;
     }
-    for (int i = 0; i < n_filters; i++){
-        sprintf(line_to_print, "Filter %s: %d/%d (running/max)\n", names[i], open_instances[i], max_instance[i]);
-        write (STDOUT_FILENO, line_to_print, 128);
-    }
+    return i;
 }
-
 
 int searchFilterIndex(char* filterName){
     int i = 0;
@@ -61,6 +79,40 @@ char* filterWithName (char* name){
         i++;
     }
     return strdup(filters[i]);
+}
+
+void printStatus(int n_filters){
+    int i = 0;
+    char* line_to_print = malloc(sizeof(char*) * 128);
+    while (i < ongoing_tasks){
+        if (strcmp(tasks_final[i], "acabou") != 0){
+            write(STDOUT_FILENO, tasks_final[i], 512);
+            i++;
+        }
+    }
+    for (int i = 0; i < n_filters; i++){
+        sprintf(line_to_print, "Filter %s: %d/%d (running/max)\n", names[i], open_instances[i], max_instance[i]);
+        write (STDOUT_FILENO, line_to_print, 128);
+    }
+}
+
+// transform /home/user/samples/sample-1.m4a output-1.m4a baixo rapido 
+// filtros a partir do 3 
+void sigchld_handler(int sig){
+    pid_t pid;
+    int status, n_cmds;
+    int index_task;
+    char** parsed_task;
+    int i = 0;
+    char* filter;
+    pid = waitpid(-1, &status, WNOHANG);
+    index_task = pid_index(pid);
+    parsed_task = cmd_parser(tasks[index_task], &n_cmds);
+    for (int i = 5 ; i < n_cmds ; i++){
+        filter = filterWithName(parsed_task[i]);
+        open_instances[searchFilterIndex(filter)]--;
+    }
+    tasks_final[index_task] = "acabou";
 }
 
 ssize_t readln(int fildes, void *buf, size_t nbyte){
@@ -145,28 +197,17 @@ void executeTask(int n_filters, char **f_a_executar, char input_file[], int task
     int ftf = open("final.txt", O_CREAT | O_RDWR, 0666);
     int status;
     pipe(fp[current_pipe]);
-    int indexes[n_filters];
-    for (int i = 0; i < n_filters; i++){
-        indexes[i] = searchFilterIndex(f_a_executar[i]);
-    }
-    for (int i = 0; i < n_filters; i++){
-        open_instances[indexes[i]]++;
-    }
     switch (pid = fork()) {
-        case 0://processo filho de controlo
+        case 0: //processo filho de controlo
             close(fp[current_pipe][1]);
             while(current_pipe <= n_filters){
                 pipe(fp[current_pipe+1]);
                 switch (fork()){
                     case 0:
                         while((nb_read = read(fp[current_pipe][0],buffer,1024)) > 0){
-                            sprintf(aux,"filho%d:lerficheiro\n",filter);
-                            write(STDOUT_FILENO,aux,25);
                             write(fp[current_pipe+1][1],buffer,nb_read);
                         }
                         sleep(2);
-                        sprintf(aux,"fim filho%d:\n",filter);
-                        write(STDOUT_FILENO,aux,25);
                         close(fp[current_pipe][0]);
                         close(fp[current_pipe+1][1]);
                         exit(0);
@@ -174,45 +215,32 @@ void executeTask(int n_filters, char **f_a_executar, char input_file[], int task
                     default:
                         close(fp[current_pipe][0]);   //fechar o descritor de leitura do pipe anterior para nao ser herdado por mais nenhum processo
                         close(fp[current_pipe+1][1]); //fechar o descritor de escrita do proximo pipe para nao ser herdado por mais nenhum processo
-                        wait(&status);
                         break;
                 }
                 current_pipe++;
                 filter++;
             }
-            sprintf(aux,"fim dos filhos\n");
-            write(STDOUT_FILENO,aux,25);
             while((nb_read = read(fp[current_pipe][0],buffer,1024)) > 0){
-                sprintf(aux,"escrever final\n");
-                write(STDOUT_FILENO,aux,25);
                 write(ftf,buffer,nb_read);
             }
-            sprintf(aux,"final\n");
-            write(STDOUT_FILENO,aux,25);
+            //
             exit(0);
             break;
         default: //processo pai:
             while ((nb_read = read(ft, buffer, 1024)) > 0) {
                 write(fp[current_pipe][1],buffer,nb_read);
             }
-            //decrementar
-            for (int i = 0; i < n_filters; i++){
-                open_instances[indexes[i]]--;
-            }
-            tasks[task-1] = "acabou";
-            printf("pai: ler ficheiro \n");
             close(fp[current_pipe][1]);
+            pause();
             break;
     }
     ongoing_tasks--;
 }
 
 int main(int argc, char* argv[]){
-
-    //int n_filters = n_lines_config();
-    //char** names = malloc(sizeof(char*)*n_filters);
-    //char** filters = malloc(sizeof(char*)*n_filters);
-    //int* max_instance = malloc(sizeof(int)*n_filters);
+    int status;
+    
+    pid_t pid;
     for (int i = 0 ; i < 5 ; i++){
         open_instances[i] = 0;
     }
@@ -224,50 +252,99 @@ int main(int argc, char* argv[]){
 
     char **parsed_commands;
     char task_array_test[4][512] = {"transform /home/user/samples/sample-1.m4a output-1.m4a baixo rapido ", "transform /home/user/samples/sample-1.m4a output-1.m4a baixo rapido eco lento alto", "transform /home/user/samples/sample-2.m4a output-3.m4a rapido rapido baixo eco", "transform /home/user/samples/sample-2.m4a output-3.m4a lento lento baixo eco"};
-    int task_counter = 1;
     int n_commands;
     char* task_to_be_parsed = malloc(sizeof(char)*128);
     int filters_exec;
+    int end_task_values[5];
+
+    int task_counter = 1;
+    signal(SIGCHLD, sigchld_handler);
     while (task_counter < 5){
-        //deverá estar dentro de um while para tratar cada pedido individualmente
-        sprintf (task_to_be_parsed, "%s", task_array_test[task_counter-1]);
-        parsed_commands = cmd_parser(task_to_be_parsed, &n_commands);
-        filters_exec = n_commands-3;
-        
-        f_a_executar = malloc(sizeof(char*) * (filters_exec));
+        if (current_waiting == next_waiting){
+            sprintf (task_to_be_parsed, "%s", task_array_test[task_counter-1]);
+            parsed_commands = cmd_parser(task_to_be_parsed, &n_commands);
+            filters_exec = n_commands-3;
+            
+            f_a_executar = malloc(sizeof(char*) * (filters_exec));
 
-        for (int i = 3; i < n_commands; i++){
-            f_a_executar[i-3] = malloc(sizeof(char)*10);
-            sprintf (f_a_executar[i-3], "%s", filterWithName(parsed_commands[i]));
+            for (int i = 3; i < n_commands; i++){
+                f_a_executar[i-3] = malloc(sizeof(char)*10);
+                sprintf (f_a_executar[i-3], "%s", filterWithName(parsed_commands[i]));
+            }
+
+            
+
+            tasks[task_counter-1] = malloc(sizeof(char) * 512);
+            sprintf (tasks[task_counter-1], "task #%d: %s", task_counter, task_array_test[task_counter-1]);
+            tasks_final[task_counter-1] = strdup(tasks[task_counter-1]);
+
+            if (checkFilters(f_a_executar, filters_exec)){
+                if((pid = fork()) == 0){
+                    write (STDOUT_FILENO, "Started task\n", 14);
+                    executeTask(filters_exec, f_a_executar, s, task_counter);
+                    exit(0);
+                }
+                else{
+                    char* filter;
+                    for(int i  = 0; i < filters_exec; i++){
+                        filter = filterWithName(f_a_executar[i]);
+                        open_instances[searchFilterIndex(filter)]++;
+                        free(filter);
+                    }
+                    pids[current_task] = pid;
+                    current_task++;
+                }
+            }
+            else{
+                waiting_tasks[next_waiting] = strdup(tasks[task_counter-1]);
+                next_waiting++;
+            }
+            
         }
+        else{
+            sprintf (task_to_be_parsed, "%s", waiting_tasks[task_counter-1]);
+            parsed_commands = cmd_parser(task_to_be_parsed, &n_commands);
+            filters_exec = n_commands-3;
+            
+            f_a_executar = malloc(sizeof(char*) * (filters_exec));
 
+            for (int i = 3; i < n_commands; i++){
+                f_a_executar[i-3] = malloc(sizeof(char)*10);
+                sprintf (f_a_executar[i-3], "%s", filterWithName(parsed_commands[i]));
+            }
+            
 
-        tasks[task_counter-1] = malloc(sizeof(char) * 512);
-        sprintf (tasks[task_counter-1], "task #%d: %s", task_counter, task_array_test[task_counter-1]);
-        
+            tasks[task_counter-1] = malloc(sizeof(char) * 512);
+            sprintf (tasks[task_counter-1], "task #%d: %s", task_counter, task_array_test[task_counter-1]);
+            tasks_final[task_counter-1] = strdup(tasks[task_counter-1]);
 
-        executeTask(filters_exec, f_a_executar, s, task_counter);
-        for(int i = 0; i < 5 ; i++){
-            printf("%d, ", open_instances[i]);
+            if (checkFilters(f_a_executar, filters_exec)){
+                if((pid = fork()) == 0){
+                    write (STDOUT_FILENO, "Started task\n", 14);
+                    executeTask(filters_exec, f_a_executar, s, task_counter);
+                    exit(0);
+                }
+                else{
+                    char* filter;
+                    for(int i  = 0; i < filters_exec; i++){
+                        filter = filterWithName(f_a_executar[i]);
+                        open_instances[searchFilterIndex(filter)]++;
+                        free(filter);
+                    }
+                    pids[current_task] = pid;
+                    current_task++;
+                }
+            }
+            else{
+                waiting_tasks[next_waiting] = strdup(tasks[task_counter-1]);
+                next_waiting++;
+            }
+
         }
-        printf ("\nDepois do execute_task");
-        for (int i = 0; i < task_counter; i++){
-            printf ("\n%s", tasks[i]);
-        }
-
+       
 
         printf ("\n");
         task_counter++;
-    }
-    sleep(5);
-
-    printf ("\n\n\n STATUS\n");
-    printStatus(n_filters);
-    printf ("\n\n\n");
-
-    printf ("Array de tasks: \n");
-    for (int i = 0; i < 4; i++){
-        printf ("%s\n", tasks[i]);
     }
 
     
@@ -288,6 +365,7 @@ int main(int argc, char* argv[]){
     }
 
 
+
     char** commands;
     int n_cmds;
 
@@ -303,6 +381,26 @@ int main(int argc, char* argv[]){
 
     */
 
-
+   //while(wait(&status));
+    //while(1);
     return 0;
 }
+
+
+/*
+if((pid = fork()) == 0){
+                write (STDOUT_FILENO, "Started task\n", 14);
+                executeTask(filters_exec, f_a_executar, s, task_counter);
+                exit(0);
+            }
+            else{
+                char* filter;
+                for(int i  = 0; i < filters_exec; i++){
+                    filter = filterWithName(f_a_executar[i]);
+                    open_instances[searchFilterIndex(filter)]++;
+                    free(filter);
+                }
+                pids[current_task] = pid;
+                current_task++;
+            }
+*/
