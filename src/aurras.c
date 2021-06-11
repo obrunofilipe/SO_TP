@@ -27,6 +27,7 @@ int main(int argc, char* argv[]){
     signal(SIGUSR2,sig2_handler);
     int client_server = open("./tmp/client_server", O_WRONLY, 0666);
     int server_client = open("./tmp/server_client", O_RDONLY, 0666);
+    int status_pipe;
     pid_t pid = getpid();
     char* task = malloc(sizeof(char) * 1024);
     //transform input output [... filters ...]
@@ -34,7 +35,9 @@ int main(int argc, char* argv[]){
     char *status = malloc(sizeof(char)*1024);
     if (argc > 1){
         if ( strcmp(argv[1],"status") == 0){
-            write(client_server, argv[1],strlen(argv[1]));
+            status_pipe = open("./tmp/status",O_WRONLY,0666);
+            write(status_pipe, argv[1],strlen(argv[1]));
+            
             while((nb_read = read(server_client, status, 1024)) > 0){
                 write(STDOUT_FILENO, status, nb_read);
             }
@@ -62,26 +65,8 @@ int main(int argc, char* argv[]){
     }
     
 
-    /*
-    char* commands = malloc(sizeof(char) * 1024);
-    
-    for (int i = 1; i < argc; i++){
-        strcat(commands, argv[i]);
-        strcat(commands, " ");
-    }
-    
-    char info[95] = "./aurras status \n./aurras transform input-filename output-filename filter-id-1 filter-id-2 ...\n";
-    int fdw = open("fifo", O_WRONLY);
-    if (argc == 1){
-        write (fdw, info, 95);
-    }
-    else{
-        write (fdw, commands, 120);
-    }
-    */
 
-   pause();
-   pause();
+   while(1);
 
     return 0;
 }
