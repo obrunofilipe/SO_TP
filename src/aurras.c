@@ -6,6 +6,7 @@
 #include <strings.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 
 
 //SIG1 -> Processing 

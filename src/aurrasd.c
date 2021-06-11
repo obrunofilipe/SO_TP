@@ -120,18 +120,19 @@ void sigchld_handler(int sig){
     char* filter;
     pid = waitpid(-1, &status, WNOHANG);
     index_task = pid_index(pid);
-    parsed_task = cmd_parser(tasks[index_task], &n_cmds);
+    parsed_task = cmd_parser(strdup(tasks[index_task]), &n_cmds);
+    printf ("TASK NO HANDLER: %s\n", tasks[index_task]);
     for (int i = 6 ; i < n_cmds ; i++){
         filter = filterWithName(parsed_task[i]);
         open_instances[searchFilterIndex(filter)]--;
     }
-    for (int i = 0; i < n_cmds - 6; i++){
+    for (int i = 0; i < 5; i++){
         printf ("%d, ", open_instances[i]);
     }
     printf ("\n");
     tasks_final[index_task] = "acabou";
     ongoing_tasks--;
-    //kill(atoi(parsed_task[0]), SIGKILL);
+    kill(atoi(parsed_task[2]), SIGKILL);
 }
 
 ssize_t readln(int fildes, void *buf, size_t nbyte){
@@ -279,7 +280,10 @@ int main(int argc, char* argv[]){
     signal(SIGCHLD, sigchld_handler);
     while (1){
         if (current_waiting < next_waiting){ //verificar se há bloqueados
-            sprintf (task_to_be_parsed, "%s", waiting_tasks[current_waiting]); // "pid task #n_task transform input output f1 f2 f3..."
+            printf ("Current waiting: %d\n", current_waiting);
+            printf ("Next waiting: %d\n", next_waiting);
+            printf ("A analisar um processo bloqueado\n");
+            sprintf (task_to_be_parsed, "%s", waiting_tasks[current_waiting]); // "task #n_task: pid transform input output f1 f2 f3..."
 
             parsed_commands = cmd_parser(task_to_be_parsed, &n_commands);
             filters_exec = n_commands-6;
@@ -294,10 +298,10 @@ int main(int argc, char* argv[]){
             
             
             if (checkFilters(f_a_executar, filters_exec)){ //verificar se podem executar
-                kill(atoi(parsed_commands[0]), SIGUSR1);    // envia sinal ao cliente a dizer que está a ser executado
+                kill(atoi(parsed_commands[2]), SIGUSR1);    // envia sinal ao cliente a dizer que está a ser executado
                 if((pid = fork()) == 0){
                     write (STDOUT_FILENO, "Started task\n", 14);
-                    executeTask(filters_exec, f_a_executar, parsed_commands[4], parsed_commands[5]);
+                    //executeTask(filters_exec, f_a_executar, parsed_commands[4], parsed_commands[5]);
                     exit(0);
                 }
                 else{
@@ -310,9 +314,14 @@ int main(int argc, char* argv[]){
                 current_waiting++;
             }
             else{ // se não puder, vai para a lista de bloqueados
-                waiting_tasks[next_waiting] = strdup(tasks[task_counter-1]);
-                kill(atoi(parsed_commands[0]), SIGUSR2); // envia sinal ao cliente a dizer que está à espera para ser executado
-                next_waiting++;
+                printf ("Não passou o checkFilters bloqueados\n");
+                printf ("Task bloqueada ainda não pode executar\n");
+                printf ("Estou no pause\n");
+                //waiting_tasks[next_waiting] = strdup(tasks[current_task]);
+                //kill(atoi(parsed_commands[2]), SIGUSR2); // envia sinal ao cliente a dizer que está à espera para ser executado
+                //next_waiting++;
+                pause();
+                printf ("Vou sair do pause\n");
             }
         }
         else{ // se não houver bloqueados, ler próxima tarefa do pipe
@@ -331,7 +340,8 @@ int main(int argc, char* argv[]){
             //"pid transform input output f1 f2 f3"
             ongoing_tasks++;
 
-            parsed_commands = cmd_parser(task, &n_commands);
+            parsed_commands = cmd_parser(strdup(task), &n_commands);
+            printf ("parsed: %s\n", parsed_commands[0]);
             filters_exec = n_commands-4;
             
             f_a_executar = malloc(sizeof(char*) * (filters_exec));
@@ -344,7 +354,9 @@ int main(int argc, char* argv[]){
 
 
             tasks[current_task] = malloc(sizeof(char) * 512);
-            sprintf (tasks[current_task], "%d task #%d: %s", atoi(parsed_commands[0]), current_task, task);
+            sprintf (tasks[current_task], "task #%d: %s", current_task+1, task);
+            printf ("%s\n", task);
+            printf ("%s\n", tasks[current_task]);
             if (checkFilters(f_a_executar, filters_exec)){
                 printf("passou chsck filters nao bloqueados\n");
                 kill(atoi(parsed_commands[0]), SIGUSR1);    // envia sinal ao cliente a dizer que está a ser executado
@@ -366,6 +378,7 @@ int main(int argc, char* argv[]){
                 printf ("não passou check filters nao bloqueados\n");
                 waiting_tasks[next_waiting] = strdup(tasks[current_task]);
                 next_waiting++;
+                printf ("Task bloqueada\n");
             }
         }
     }
