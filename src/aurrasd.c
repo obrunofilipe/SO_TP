@@ -285,12 +285,15 @@ int main(int argc, char* argv[]){
     int filters_exec;
     int task_counter = 1;
     int index_task;
+    int read_value;
     signal(SIGCHLD, sigchld_handler);
     while (1){
-        if(read(status_rd, status, 10) > 0 && strcmp(status, "status") == 0){
+        if((read_value = read(status_rd, status, 10)) > 0 /*&& strcmp(status, "status") == 0*/){
+            printf ("ENTROU NA MERDA DO READ DO STATUS CARALHO\n");
             char* string_to_print = printStatus(n_filters);
             write(server_client_wr, string_to_print, strlen(string_to_print));
         }
+        printf ("%d\n", read_value);
         if (current_waiting < next_waiting){ //verificar se há bloqueados
             printf ("Current waiting: %d\n", current_waiting);
             printf ("Next waiting: %d\n", next_waiting);
@@ -352,56 +355,50 @@ int main(int argc, char* argv[]){
                 printf ("%d,", max_instance[i]);
             }
 
-            if (strcmp(task, "status") == 0){
+            
 
-                char* status = printStatus(n_filters);
-                write(client_server_wr, status, strlen(status));
+            parsed_commands = cmd_parser(strdup(task), &n_commands);
+            printf ("parsed: %s\n", parsed_commands[0]);
+            filters_exec = n_commands-4;
+            
+            f_a_executar = malloc(sizeof(char*) * (filters_exec));
+
+            for (int i = 4; i < n_commands; i++){
+                f_a_executar[i-4] = malloc(sizeof(char)*30);
+                sprintf (f_a_executar[i-4], "%s", filterWithName(parsed_commands[i]));
             }
-            else{
-                parsed_commands = cmd_parser(strdup(task), &n_commands);
-                printf ("parsed: %s\n", parsed_commands[0]);
-                filters_exec = n_commands-4;
-                
-                f_a_executar = malloc(sizeof(char*) * (filters_exec));
-
-                for (int i = 4; i < n_commands; i++){
-                    f_a_executar[i-4] = malloc(sizeof(char)*30);
-                    sprintf (f_a_executar[i-4], "%s", filterWithName(parsed_commands[i]));
-                }
 
 
 
-                tasks[number_of_tasks] = malloc(sizeof(char) * 512);
-                sprintf (tasks[number_of_tasks], "task #%d: %s", number_of_tasks+1, task);
-                
-                printf ("%s\n", task);
-                printf ("%s\n", tasks[number_of_tasks]);
-                if (checkFilters(f_a_executar, filters_exec)){
-                    printf("passou chsck filters nao bloqueados\n");
-                    kill(atoi(parsed_commands[0]), SIGUSR1);    // envia sinal ao cliente a dizer que está a ser executado
-                    if((pid = fork()) == 0){
-                        write (STDOUT_FILENO, "Started task\n", 14);
-                        executeTask(filters_exec, f_a_executar, parsed_commands[2], parsed_commands[3]);
-                        exit(0);
-                    }
-                    else{
-                        char* filter;
-                        for(int i  = 0; i < filters_exec; i++){
-                            open_instances[searchFilterIndex(f_a_executar[i])]++;
-                        }
-                        pids[number_of_tasks] = pid;
-                    }
+            tasks[number_of_tasks] = malloc(sizeof(char) * 512);
+            sprintf (tasks[number_of_tasks], "task #%d: %s", number_of_tasks+1, task);
+            
+            printf ("%s\n", task);
+            printf ("%s\n", tasks[number_of_tasks]);
+            if (checkFilters(f_a_executar, filters_exec)){
+                printf("passou chsck filters nao bloqueados\n");
+                kill(atoi(parsed_commands[0]), SIGUSR1);    // envia sinal ao cliente a dizer que está a ser executado
+                if((pid = fork()) == 0){
+                    write (STDOUT_FILENO, "Started task\n", 14);
+                    executeTask(filters_exec, f_a_executar, parsed_commands[2], parsed_commands[3]);
+                    exit(0);
                 }
                 else{
-                    printf ("não passou check filters nao bloqueados\n");
-                    waiting_tasks[next_waiting] = strdup(tasks[number_of_tasks]);
-                    kill(atoi(parsed_commands[0]), SIGUSR2);
-                    next_waiting++;
-                    printf ("Task bloqueada\n");
+                    char* filter;
+                    for(int i  = 0; i < filters_exec; i++){
+                        open_instances[searchFilterIndex(f_a_executar[i])]++;
+                    }
+                    pids[number_of_tasks] = pid;
                 }
-                number_of_tasks++;
             }
-
+            else{
+                printf ("não passou check filters nao bloqueados\n");
+                waiting_tasks[next_waiting] = strdup(tasks[number_of_tasks]);
+                kill(atoi(parsed_commands[0]), SIGUSR2);
+                next_waiting++;
+                printf ("Task bloqueada\n");
+            }
+            number_of_tasks++;
         }
     }
 

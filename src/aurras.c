@@ -27,18 +27,22 @@ int main(int argc, char* argv[]){
     signal(SIGUSR2,sig2_handler);
     int client_server = open("./tmp/client_server", O_WRONLY, 0666);
     int server_client = open("./tmp/server_client", O_RDONLY, 0666);
-    int status_pipe;
+    int status_pipe = open("./tmp/status",O_WRONLY,0666);
+    close(status_pipe);
     pid_t pid = getpid();
     char* task = malloc(sizeof(char) * 1024);
     //transform input output [... filters ...]
     int nb_read;
     char *status = malloc(sizeof(char)*1024);
     if (argc > 1){
-        if ( strcmp(argv[1],"status") == 0){
+        if (strcmp(argv[1],"status") == 0){
+            printf("entei no print status\n");
             status_pipe = open("./tmp/status",O_WRONLY,0666);
             write(status_pipe, argv[1],strlen(argv[1]));
-            
+            printf("entrei no print status\n");
+            //close(status_pipe);
             while((nb_read = read(server_client, status, 1024)) > 0){
+                printf("entrei no read\n");
                 write(STDOUT_FILENO, status, nb_read);
             }
         }
@@ -64,9 +68,9 @@ int main(int argc, char* argv[]){
         printf ("Aurras usage: \n%s", info);
     }
     
+    printf ("cheguei antes do while\n");
 
-
-   while(1);
+    while(1);
 
     return 0;
 }
