@@ -9,6 +9,10 @@
 #include <signal.h>
 
 
+#define TRUE 1
+#define FALSE 0
+
+
 //SIG1 -> Processing 
 //SIG2 -> Pending
 
@@ -33,18 +37,20 @@ int main(int argc, char* argv[]){
     char* task = malloc(sizeof(char) * 1024);
     //transform input output [... filters ...]
     int nb_read;
+    char* ignore = malloc(sizeof(char) * 20);
+    sprintf (ignore, "ignore_this_message");
     char *status = malloc(sizeof(char)*1024);
+    int read_flag = FALSE;
     if (argc > 1){
         if (strcmp(argv[1],"status") == 0){
-            printf("entei no print status\n");
             status_pipe = open("./tmp/status",O_WRONLY,0666);
             write(status_pipe, argv[1],strlen(argv[1]));
-            printf("entrei no print status\n");
-            //close(status_pipe);
-            while((nb_read = read(server_client, status, 1024)) > 0){
-                printf("entrei no read\n");
+            write(client_server, ignore, 19);
+            while(!read_flag && (nb_read = read(server_client, status, 1024)) > 0){
                 write(STDOUT_FILENO, status, nb_read);
+                read_flag = TRUE;
             }
+            close(status_pipe);
         }
         else if ((strcmp(argv[1], "transform") == 0) && argc >= 5){
             task[0] = '\0';
@@ -57,6 +63,7 @@ int main(int argc, char* argv[]){
             }
             write(client_server, task, strlen(task));
             printf("%s\n", task);
+            while(1);
         }
         else {
             char info[95] = "./aurras status \n./aurras transform input-filename output-filename filter-id-1 filter-id-2 ...\n";
@@ -70,7 +77,7 @@ int main(int argc, char* argv[]){
     
     printf ("cheguei antes do while\n");
 
-    while(1);
+    //while(1);
 
     return 0;
 }

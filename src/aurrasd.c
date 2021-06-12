@@ -98,20 +98,20 @@ char* filterWithName (char* name){
 
 char* printStatus(int n_filters){
     int i = 0;
-    char* line_to_print = malloc(sizeof(char*) * 128);
+    char* line_to_print = malloc(sizeof(char*) * 1024);
     line_to_print[0] = '\0';
     char* final_print = malloc(sizeof(char*) * 1024);
     while (i < number_of_tasks){
         if (strcmp(tasks[i], "acabou") != 0){
+            printf ("Task %d: %s\n", i, tasks[i]);
             strcat(line_to_print, tasks[i]);
             strcat(line_to_print, "\n");
         }
         i++;
     }
     for (int i = 0; i < n_filters; i++){
-        sprintf(line_to_print, "Filter %s: %d/%d (running/max)\n", names[i], open_instances[i], max_instance[i]);
-        strcat(line_to_print, line_to_print);
-        write (STDOUT_FILENO, line_to_print, 128);
+        sprintf(final_print, "Filter %s: %d/%d (running/max)\n", names[i], open_instances[i], max_instance[i]);
+        strcat(line_to_print, final_print);
     }
     return line_to_print;
 }
@@ -192,33 +192,36 @@ int n_lines_config(){
     return result;
 }
 
-void read_config(char** names, char** filters, int* max_instance){
+void read_config(char** names, char** filters, int* max_instance, char* config_filename, char* filters_folder){
     char* line = malloc(sizeof(char)*100);
     char** parsed_line;
     int counter = 0;
     int ignore;
-    int fd = open("./etc/aurrasd.conf", O_RDONLY, 0666);
+    char* folder_cat;
+    int fd = open(config_filename, O_RDONLY, 0666);
     ssize_t size;
     while ((size = readln(fd, line, 100)) > 0){
+        folder_cat = strdup(filters_folder);
         line[size] = '\0';
         parsed_line = cmd_parser(line, &ignore);
         names[counter] = strdup(parsed_line[0]);
-        filters[counter] = strdup(parsed_line[1]);
+        strcat(folder_cat, strdup(parsed_line[1]));
+        filters[counter] = folder_cat;
         max_instance[counter] = atoi(parsed_line[2]);
         counter++;
     }
     n_filters = counter;
 }
 
-void executeTask(int n_filters, char **f_a_executar, char input_file[],char output_file[]){
+void executeTask(int n_filters, char **f_a_executar, char* input_file,char* output_file){
     int fp [n_filters + 1][2];
     int current_pipe = 0;
     char *buffer = malloc(sizeof(char) * 1024);
     buffer = strdup("\nmensagem para teste\n");
     int filter = 0;
     int nb_read;
-    int ft = open("teste.txt",O_RDONLY,0666);
-    int ftf = open("final.txt", O_CREAT | O_RDWR, 0666);
+    int ft = open(input_file,O_RDONLY,0666);
+    int ftf = open("./tmp/coiso" ,O_CREAT | O_RDWR, 0666);
     int status;
     pipe(fp[current_pipe]);
     switch (fork()) {
@@ -228,13 +231,16 @@ void executeTask(int n_filters, char **f_a_executar, char input_file[],char outp
                 pipe(fp[current_pipe+1]);
                 switch (fork()){
                     case 0:
+                        /*
                         while((nb_read = read(fp[current_pipe][0],buffer,1024)) > 0){
                             write(fp[current_pipe+1][1],buffer,nb_read);
                         }
-                        sleep(10);
+                        */
+                        dup2(fp[current_pipe][0],STDIN_FILENO);
                         close(fp[current_pipe][0]);
+                        dup2(fp[current_pipe+1][1],STDOUT_FILENO);
                         close(fp[current_pipe+1][1]);
-                        exit(0);
+                        execl(f_a_executar[filter],f_a_executar[filter],NULL);
                         break;
                     default:
                         close(fp[current_pipe][0]);   //fechar o descritor de leitura do pipe anterior para nao ser herdado por mais nenhum processo
@@ -247,6 +253,7 @@ void executeTask(int n_filters, char **f_a_executar, char input_file[],char outp
             while((nb_read = read(fp[current_pipe][0],buffer,1024)) > 0){
                 write(ftf,buffer,nb_read);
             }
+
             //
             exit(0);
             break;
@@ -273,7 +280,12 @@ int main(int argc, char* argv[]){
     for (int i = 0 ; i < 5 ; i++){
         open_instances[i] = 0;
     }
-    read_config(names, filters, max_instance);
+    read_config(names, filters, max_instance, argv[1], argv[2]);
+
+    for (int i = 0; i < n_filters; i++){
+        printf ("%s\n", filters[i]);
+        printf ("%s\n", names[i]);
+    }
 
     char** f_a_executar;
     
@@ -289,7 +301,7 @@ int main(int argc, char* argv[]){
     signal(SIGCHLD, sigchld_handler);
     while (1){
         if((read_value = read(status_rd, status, 10)) > 0 /*&& strcmp(status, "status") == 0*/){
-            printf ("ENTROU NA MERDA DO READ DO STATUS CARALHO\n");
+            printf ("Number of tasks: %d\n", number_of_tasks);
             char* string_to_print = printStatus(n_filters);
             write(server_client_wr, string_to_print, strlen(string_to_print));
         }
@@ -355,50 +367,52 @@ int main(int argc, char* argv[]){
                 printf ("%d,", max_instance[i]);
             }
 
-            
+            if (strcmp(task, "ignore_this_message") != 0){
+                parsed_commands = cmd_parser(strdup(task), &n_commands);
+                printf ("parsed: %s\n", parsed_commands[0]);
+                filters_exec = n_commands-4;
+                
+                f_a_executar = malloc(sizeof(char*) * (filters_exec));
 
-            parsed_commands = cmd_parser(strdup(task), &n_commands);
-            printf ("parsed: %s\n", parsed_commands[0]);
-            filters_exec = n_commands-4;
-            
-            f_a_executar = malloc(sizeof(char*) * (filters_exec));
-
-            for (int i = 4; i < n_commands; i++){
-                f_a_executar[i-4] = malloc(sizeof(char)*30);
-                sprintf (f_a_executar[i-4], "%s", filterWithName(parsed_commands[i]));
-            }
-
+                for (int i = 4; i < n_commands; i++){
+                    f_a_executar[i-4] = malloc(sizeof(char)*30);
+                    sprintf (f_a_executar[i-4], "%s", filterWithName(parsed_commands[i]));
+                }
 
 
-            tasks[number_of_tasks] = malloc(sizeof(char) * 512);
-            sprintf (tasks[number_of_tasks], "task #%d: %s", number_of_tasks+1, task);
-            
-            printf ("%s\n", task);
-            printf ("%s\n", tasks[number_of_tasks]);
-            if (checkFilters(f_a_executar, filters_exec)){
-                printf("passou chsck filters nao bloqueados\n");
-                kill(atoi(parsed_commands[0]), SIGUSR1);    // envia sinal ao cliente a dizer que está a ser executado
-                if((pid = fork()) == 0){
-                    write (STDOUT_FILENO, "Started task\n", 14);
-                    executeTask(filters_exec, f_a_executar, parsed_commands[2], parsed_commands[3]);
-                    exit(0);
+
+                tasks[number_of_tasks] = malloc(sizeof(char) * 512);
+                sprintf (tasks[number_of_tasks], "task #%d: %s", number_of_tasks+1, task);
+                
+                printf ("%s\n", task);
+                printf ("%s\n", tasks[number_of_tasks]);
+                if (checkFilters(f_a_executar, filters_exec)){
+                    printf("passou chsck filters nao bloqueados\n");
+                    kill(atoi(parsed_commands[0]), SIGUSR1);    // envia sinal ao cliente a dizer que está a ser executado
+                    if((pid = fork()) == 0){
+                        write (STDOUT_FILENO, "Started task\n", 14);
+                        executeTask(filters_exec, f_a_executar, parsed_commands[2], parsed_commands[3]);
+                        exit(0);
+                    }
+                    else{
+                        char* filter;
+                        for(int i  = 0; i < filters_exec; i++){
+                            open_instances[searchFilterIndex(f_a_executar[i])]++;
+                        }
+                        pids[number_of_tasks] = pid;
+                    }
                 }
                 else{
-                    char* filter;
-                    for(int i  = 0; i < filters_exec; i++){
-                        open_instances[searchFilterIndex(f_a_executar[i])]++;
-                    }
-                    pids[number_of_tasks] = pid;
+                    printf ("não passou check filters nao bloqueados\n");
+                    waiting_tasks[next_waiting] = strdup(tasks[number_of_tasks]);
+                    kill(atoi(parsed_commands[0]), SIGUSR2);
+                    next_waiting++;
+                    printf ("Task bloqueada\n");
                 }
+                number_of_tasks++;
             }
-            else{
-                printf ("não passou check filters nao bloqueados\n");
-                waiting_tasks[next_waiting] = strdup(tasks[number_of_tasks]);
-                kill(atoi(parsed_commands[0]), SIGUSR2);
-                next_waiting++;
-                printf ("Task bloqueada\n");
-            }
-            number_of_tasks++;
+
+            
         }
     }
 
