@@ -212,52 +212,62 @@ void read_config(char** names, char** filters, int* max_instance, char* config_f
     }
     n_filters = counter;
 }
-
-void executeTask(int n_filters, char **f_a_executar, char* input_file,char* output_file){
-    int fp [n_filters + 1][2];
+/*
+void executeTask(int number_filters, char **f_a_executar, char* input_file, char* output_file){
+    int fp [number_filters + 1][2];
     int current_pipe = 0;
     char *buffer = malloc(sizeof(char) * 1024);
     buffer = strdup("\nmensagem para teste\n");
     int filter = 0;
     int nb_read;
     int ft = open(input_file,O_RDONLY,0666);
-    int ftf = open("./tmp/coiso" ,O_CREAT | O_RDWR, 0666);
-    int status;
+    if(ft != -1 ) printf("\nficheiro aberto\n");
+    int ftf = open("./tmp/coiso", O_CREAT | O_WRONLY, 0666);
+    int status,counter = 0;
     pipe(fp[current_pipe]);
+    int pid;
     switch (fork()) {
         case 0: //processo filho de controlo
+            write(STDOUT_FILENO,"\n\n\nENTROU NO FILHO \n\n\n\n",30);
             close(fp[current_pipe][1]);
-            while(current_pipe <= n_filters){
+            while(current_pipe < number_filters){
+                
+                write(STDOUT_FILENO,"\na executar filtros\n",21);
                 pipe(fp[current_pipe+1]);
-                switch (fork()){
+                switch (pid = fork()){
                     case 0:
-                        /*
+                        
                         while((nb_read = read(fp[current_pipe][0],buffer,1024)) > 0){
                             write(fp[current_pipe+1][1],buffer,nb_read);
                         }
-                        */
+                       
+                        printf ("A executar o filtro %s\n", f_a_executar[filter]);
                         dup2(fp[current_pipe][0],STDIN_FILENO);
                         close(fp[current_pipe][0]);
                         dup2(fp[current_pipe+1][1],STDOUT_FILENO);
                         close(fp[current_pipe+1][1]);
-                        execl(f_a_executar[filter],f_a_executar[filter],NULL);
+                        execl(f_a_executar[filter], f_a_executar[filter], NULL);
+                        printf ("nao executou o filtro %s\n", f_a_executar[filter]);
                         break;
                     default:
                         close(fp[current_pipe][0]);   //fechar o descritor de leitura do pipe anterior para nao ser herdado por mais nenhum processo
-                        close(fp[current_pipe+1][1]); //fechar o descritor de escrita do proximo pipe para nao ser herdado por mais nenhum processo
+                        close(fp[current_pipe+1][1]);
                         break;
                 }
                 current_pipe++;
                 filter++;
+                
             }
+            write(STDOUT_FILENO, "\n\nprocesso filho vai ler do pipe para escrever no ficheiro\n", 62);
             while((nb_read = read(fp[current_pipe][0],buffer,1024)) > 0){
                 write(ftf,buffer,nb_read);
+                write(STDOUT_FILENO,"escrever\n",10);
             }
 
-            //
             exit(0);
             break;
         default: //processo pai:
+            write(STDOUT_FILENO,"\n\nprocesso pai vai escrever no pipe\n",35);
             while ((nb_read = read(ft, buffer, 1024)) > 0) {
                 write(fp[current_pipe][1],buffer,nb_read);
             }
@@ -266,6 +276,67 @@ void executeTask(int n_filters, char **f_a_executar, char* input_file,char* outp
             break;
     }
 }
+*/
+void new_executeTask(int number_filters, char **f_a_executar, char* input_file, char* output_file){
+    int input = open(input_file, O_RDONLY, 0666);
+    char * tmp_out_buf = malloc(sizeof(char) * 128);
+    char* buffer =malloc(sizeof(char) * MAX_SIZE_BUFFER); 
+    sprintf(tmp_out_buf,"tmp/task$%d",number_of_tasks);
+    int tmp_output = open(tmp_out_buf, O_CREAT | O_WRONLY, 0666);
+    int fd_pipe[number_filters + 1][2],nb_read;
+    pipe(fd_pipe[0]); //pipe para o pai escrever para o primeiro filtro o conteudo do ficheiro input
+    int counter;
+    for(counter = 0; counter < number_filters ; counter++){
+        pipe(fd_pipe[counter+1]);//criação do pipe para a comunicação entre o filtro que vai executar e o proximo filtro
+        if(counter == 0 ){
+            switch(fork()){
+                case 0:
+                    /* -- fechar o descritor de escrita do pipe -- */
+                    close(fd_pipe[counter][1]);
+                    dup2(fd_pipe[counter][0],STDIN_FILENO);
+                    close(fd_pipe[counter][0]);
+                    dup2(fd_pipe[counter+1][1],STDOUT_FILENO);
+                    close(fd_pipe[counter+1][1]);
+                    execl(f_a_executar[counter],f_a_executar[counter],NULL);
+                    break;
+                default:
+                    close(fd_pipe[counter+1][1]);
+                    /* --- ler o conteudo do ficheiro --- */
+                    while((nb_read = read(input,buffer,MAX_SIZE_BUFFER)) > 0){
+                        write(fd_pipe[counter][1],buffer,nb_read); /* -- escrever para o pipe o conteudo do ficheiro -- */
+                        printf("escreveu\n");
+                    }
+                    close(fd_pipe[counter][1]);
+                    break;
+            }
+        }
+        else{
+            switch(fork()){
+                case 0:
+                    dup2(fd_pipe[counter][0],STDIN_FILENO);
+                    close(fd_pipe[counter][0]);
+                    dup2(fd_pipe[counter+1][1],STDOUT_FILENO);
+                    close(fd_pipe[counter+1][1]);
+                    execl(f_a_executar[counter],f_a_executar[counter],NULL);
+                    break;
+                default:
+                    close(fd_pipe[counter+1][1]);
+                    break;
+            }
+        }
+    }
+    while((nb_read = read(fd_pipe[counter][0],buffer,MAX_SIZE_BUFFER)) > 0){
+        write(tmp_output,buffer,nb_read);
+    }
+    if(fork() == 0){
+        //close(STDOUT_FILENO);
+        printf("ficheiro: %s\n",output_file);
+        execlp("ffmpeg", "ffmpeg" ,"-i" ,tmp_out_buf, output_file, NULL);
+        perror("execlp");
+    }
+    else wait(NULL);
+}
+
 
 int main(int argc, char* argv[]){
     /* ------ make named pipe ------ */
@@ -330,7 +401,8 @@ int main(int argc, char* argv[]){
                 kill(atoi(parsed_commands[2]), SIGUSR1);    // envia sinal ao cliente a dizer que está a ser executado
                 if((pid = fork()) == 0){
                     write (STDOUT_FILENO, "Started task\n", 14);
-                    executeTask(filters_exec, f_a_executar, parsed_commands[4], parsed_commands[5]);
+                    signal(SIGCHLD,SIG_DFL);
+                    new_executeTask(filters_exec, f_a_executar, parsed_commands[4], parsed_commands[5]);
                     exit(0);
                 }
                 else{
@@ -391,7 +463,8 @@ int main(int argc, char* argv[]){
                     kill(atoi(parsed_commands[0]), SIGUSR1);    // envia sinal ao cliente a dizer que está a ser executado
                     if((pid = fork()) == 0){
                         write (STDOUT_FILENO, "Started task\n", 14);
-                        executeTask(filters_exec, f_a_executar, parsed_commands[2], parsed_commands[3]);
+                        signal(SIGCHLD,SIG_DFL);
+                        new_executeTask(filters_exec, f_a_executar, parsed_commands[2], parsed_commands[3]);
                         exit(0);
                     }
                     else{
