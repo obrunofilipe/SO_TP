@@ -29,9 +29,9 @@ void sig2_handler(int sig1){
 int main(int argc, char* argv[]){
     signal(SIGUSR1,sig1_handler);
     signal(SIGUSR2,sig2_handler);
-    int client_server = open("./tmp/client_server", O_WRONLY, 0666);
-    int server_client = open("./tmp/server_client", O_RDONLY, 0666);
-    int status_pipe = open("./tmp/status",O_WRONLY,0666);
+    int client_server = open("../tmp/client_server", O_WRONLY, 0666);
+    int server_client = open("../tmp/server_client", O_RDONLY, 0666);
+    int status_pipe = open("../tmp/status",O_WRONLY,0666);
     close(status_pipe);
     pid_t pid = getpid();
     char* task = malloc(sizeof(char) * 1024);
@@ -43,7 +43,7 @@ int main(int argc, char* argv[]){
     int read_flag = FALSE;
     if (argc > 1){
         if (strcmp(argv[1],"status") == 0){
-            status_pipe = open("./tmp/status",O_WRONLY,0666);
+            status_pipe = open("../tmp/status",O_WRONLY,0666);
             write(status_pipe, argv[1],strlen(argv[1]));
             write(client_server, ignore, 19);
             while(!read_flag && (nb_read = read(server_client, status, 1024)) > 0){

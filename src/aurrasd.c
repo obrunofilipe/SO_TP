@@ -278,11 +278,13 @@ void executeTask(int number_filters, char **f_a_executar, char* input_file, char
 }
 */
 void new_executeTask(int number_filters, char **f_a_executar, char* input_file, char* output_file){
-    int input = open(input_file, O_RDONLY, 0666);
+    int input = open(strdup(input_file), O_RDONLY, 0666);
+    printf ("INPUT OPEN RESULT: %d -> %s\n", input, input_file);
     char * tmp_out_buf = malloc(sizeof(char) * 128);
     char* buffer =malloc(sizeof(char) * MAX_SIZE_BUFFER); 
-    sprintf(tmp_out_buf,"tmp/task$%d",number_of_tasks);
+    sprintf(tmp_out_buf,"../tmp/task$%d",number_of_tasks);
     int tmp_output = open(tmp_out_buf, O_CREAT | O_WRONLY, 0666);
+    printf ("TMP OUTPUT: %d\n", tmp_output);
     int fd_pipe[number_filters + 1][2],nb_read;
     pipe(fd_pipe[0]); //pipe para o pai escrever para o primeiro filtro o conteudo do ficheiro input
     int counter;
@@ -340,18 +342,21 @@ void new_executeTask(int number_filters, char **f_a_executar, char* input_file, 
 
 int main(int argc, char* argv[]){
     /* ------ make named pipe ------ */
-    mkfifo("./tmp/client_server",0666);
-    mkfifo("./tmp/server_client",0666);
-    mkfifo("./tmp/status",0666);
-    int client_server_rd = open("./tmp/client_server",O_RDONLY,0666); 
-    int client_server_wr = open("./tmp/client_server",O_WRONLY,0666); 
-    int server_client_wr = open("./tmp/server_client",O_WRONLY,0666);
-    int status_rd = open("./tmp/status",O_RDONLY,0666);
+    mkfifo("../tmp/client_server",0666);
+    mkfifo("../tmp/server_client",0666);
+    mkfifo("../tmp/status",0666);
+    int client_server_rd = open("../tmp/client_server",O_RDONLY,0666); 
+    int client_server_wr = open("../tmp/client_server",O_WRONLY,0666); 
+    int server_client_wr = open("../tmp/server_client",O_WRONLY,0666);
+    int status_rd = open("../tmp/status",O_RDONLY,0666);
     pid_t pid;
     for (int i = 0 ; i < 5 ; i++){
         open_instances[i] = 0;
     }
+
+    printf ("%s\n", argv[2]);
     read_config(names, filters, max_instance, argv[1], argv[2]);
+                                                        //aurrasd-filters/
 
     for (int i = 0; i < n_filters; i++){
         printf ("%s\n", filters[i]);
