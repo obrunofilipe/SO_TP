@@ -36,7 +36,7 @@ int nextTask;
 int ongoing_tasks = 0;
 int current_task = 0;
 int number_of_tasks = 0;
-
+int flag_block = TRUE;
 int server_client;
 
 
@@ -128,6 +128,7 @@ void sigchld_handler(int sig){
         open_instances[searchFilterIndex(filter)]--;
     }
     tasks[index_task] = "acabou";
+    flag_block = TRUE;
     kill(atoi(parsed_task[2]), SIGKILL);
 }
 
@@ -273,7 +274,7 @@ int main(int argc, char* argv[]){
             char* string_to_print = printStatus(n_filters);
             write(server_client_wr, string_to_print, STD_SIZE);
         }
-        if (current_waiting < next_waiting){ //verificar se há bloqueados
+        if ( flag_block && current_waiting < next_waiting){ //verificar se há bloqueados
             write(STDOUT_FILENO,"Analisando Tasks Bloqueadas\n",29);
             sprintf (task_to_be_parsed, "%s", waiting_tasks[current_waiting]);
 
@@ -307,9 +308,12 @@ int main(int argc, char* argv[]){
             }
             else{ // se não puder, vai para a lista de bloqueados
                 write(STDOUT_FILENO, "Task bloqueada ainda não pode executar\n", 40);
+                flag_block = FALSE;
+                //pause();
+
             }
         }
-        else{ // se não houver bloqueados, ler próxima tarefa do pipe
+        else if (flag_block){ // se não houver bloqueados, ler próxima tarefa do pipe
 
             char* task = malloc(sizeof(char) * STD_SIZE);
             printf("\nLeitura da Task\n");
